@@ -33,7 +33,7 @@ VIDEO_ROOT = Path("/aifs4su/zhanqimin/ai_for_healthcare/data"
 # ─── API ─────────────────────────────────────────────────────────────────────
 API_URL = "https://api3.xhub.chat/v1/chat/completions"
 API_KEY = "sk-Co7aVxrhEYKOomDszhPgOvksE1sLEaOLl4MVV5g1AnOaTE1z"
-MODEL   = "gemini-2.5-flash"
+MODEL   = "gemini-3.1-pro-preview"
 
 # ─── 采样参数 ─────────────────────────────────────────────────────────────────
 MAX_VIDEOS        = 4   # 每个 couple 最多取前4个视频
@@ -49,47 +49,19 @@ MAX_SAMPLES      = None  # 调试时改为 3
 SYSTEM_PROMPT = """你是一位生殖医学专家，专门从事 IVF（试管婴儿）胚胎评估。
 
 你将收到：
-1. 一批胚胎培养视频帧（来自新鲜周期，每组帧对应一枚胚胎的培养全过程）
-2. 该批胚胎的文字培养记录（embryo_culture，每枚胚胎的评分）
-3. 本次复苏移植记录（embryo_transfer，说明移植了哪枚/哪些胚胎）
+1. 一批胚胎培养视频帧（来自新鲜周期，每组帧对应一枚胚胎从受精到囊胚期的完整培养过程）
 
-请根据以上信息，预测本次冷冻胚胎移植（FET）是否会发生临床妊娠。
+请仅根据视频帧，预测本次冷冻胚胎移植（FET）是否会发生临床妊娠。
 
 ══════════════════ 视频帧说明 ══════════════════
-- 每组帧标注了来源胚胎编号（no），帧按时间顺序均匀采样
+- 每组帧标注了来源胚胎编号（no），帧按时间顺序均匀采样自培养视频
 - 视频记录胚胎从受精（Day0）到囊胚期（Day5-7）的完整培养过程
 - 重点观察：细胞分裂对称性、碎片率、囊胚形成质量、透明带完整性
-
-══════════════════ 字段说明 ══════════════════
-
-▌ embryo_culture（胚胎培养记录，每行一枚胚胎）
-  no      : 胚胎编号（对应视频文件名）
-  d1      : Day1受精结果（2PN=正常受精 / 0PN/1PN/多PN=异常）
-  d2      : Day2卵裂评分
-  d3      : Day3评分（如"841"=8细胞/4级碎片/1碎片）
-  level1  : 卵裂期综合评级（1优质/2良好/3一般/4差/5退化）
-  result  : 卵裂期结局（冷冻/继续培养/退化）
-  d5/d6/d7: Day5/6/7囊胚评分（如"4AA"=扩展囊胚AA级）
-  level2  : 囊胚期综合评级（1优质/2良好/3可利用/4不可用）
-  result2 : 囊胚期结局（冷冻/退化）
-  tech    : 技术方式（常规IVF/ICSI）
-  type    : 胚胎类型（卵裂期/囊胚期）
-
-▌ embryo_transfer（本次复苏移植记录）
-  etcount    : 移植胚胎个数
-  etypcount  : 移植优胚个数
-  emtype     : 移植胚胎属性（冷冻/新鲜）
-  em_type1   : 第1胚胎类型（卵裂期/囊胚期）
-  etmsg1     : 移植时第1胚胎评分（如"4AB"）
-  etlevel1   : 移植时第1胚胎评级
-  pyday1     : 第1胚胎培养天数（D3/D5/D6）
-  cohage1    : 取卵时女方年龄
-  （第2胚胎字段以2结尾，结构同上）
 
 ══════════════════ 输出格式（严格）══════════════════
 必须且只能输出以下 JSON，不得有任何额外文字或 markdown 代码块：
 {
-  "cot": "详细推理过程，结合视频观察和文字记录",
+  "cot": "详细推理过程，结合视频帧观察综合分析",
   "result": "阳性",
   "confidence": 0.75
 }
@@ -171,16 +143,13 @@ def no_from_path(video_path: Path) -> str:
 
 
 # ─── 构建请求内容 ─────────────────────────────────────────────────────────────
-def build_user_content(text_data: dict, video_paths: list[Path]) -> list[dict] | str:
-    text = (
-        "请根据以下胚胎培养记录和视频帧预测本次冷冻胚胎移植的临床妊娠结局。\n\n"
-        + json.dumps(text_data, ensure_ascii=False, indent=2)
-    )
+def build_user_content(video_paths: list[Path]) -> list[dict] | str:
+    intro = "请根据以下胚胎培养视频帧，预测本次冷冻胚胎移植的临床妊娠结局。"
 
     if not video_paths:
-        return text
+        return intro
 
-    content: list[dict] = [{"type": "text", "text": text}]
+    content: list[dict] = [{"type": "text", "text": intro}]
 
     for vp in video_paths:
         embryo_no = no_from_path(vp)
@@ -191,7 +160,10 @@ def build_user_content(text_data: dict, video_paths: list[Path]) -> list[dict] |
 
         content.append({
             "type": "text",
-            "text": f"【胚胎 no={embryo_no} 的培养视频，均匀采样 {len(frames)} 帧，时间顺序排列】"
+            "text": (
+                f"【胚胎编号 no={embryo_no} 的培养视频帧】\n"
+                f"以下 {len(frames)} 张图片为该胚胎从受精到囊胚期的培养过程，按时间顺序均匀采样。"
+            )
         })
         for b64 in frames:
             content.append({
@@ -200,18 +172,6 @@ def build_user_content(text_data: dict, video_paths: list[Path]) -> list[dict] |
             })
 
     return content
-
-
-def build_text_data(fresh_cycle: dict, transfer_cycle: dict) -> dict:
-    """只保留 embryo_culture + embryo_transfer（剔除 label 相关字段）。"""
-    et = transfer_cycle.get("embryo_transfer", {})
-    et_clean = {k: v for k, v in et.items()
-                if k not in ("id", "pt_id") and v is not None
-                and str(v) not in ("NaT", "nan")}
-    return {
-        "embryo_culture": fresh_cycle.get("embryo_culture", []),
-        "embryo_transfer": et_clean,
-    }
 
 
 # ─── LLM 调用 ─────────────────────────────────────────────────────────────────
@@ -284,12 +244,10 @@ def main():
             continue
 
         samples.append({
-            "couple_id":     cid,
-            "fresh_pt_id":   str(fresh_cycle.get("pt_id")),
+            "couple_id":      cid,
+            "fresh_pt_id":    str(fresh_cycle.get("pt_id")),
             "transfer_pt_id": str(transfer_cycle.get("pt_id")),
-            "true_label":    transfer_cycle["label"]["clinic_preg"],
-            "fresh_cycle":   fresh_cycle,
-            "transfer_cycle": transfer_cycle,
+            "true_label":     transfer_cycle["label"]["clinic_preg"],
         })
 
     if MAX_SAMPLES:
@@ -306,8 +264,7 @@ def main():
         video_paths = get_video_paths(fpid)
         print(f"视频: {len(video_paths)} 个", end="  ")
 
-        text_data    = build_text_data(s["fresh_cycle"], s["transfer_cycle"])
-        user_content = build_user_content(text_data, video_paths)
+        user_content = build_user_content(video_paths)
 
         llm_out = call_llm(user_content)
 
