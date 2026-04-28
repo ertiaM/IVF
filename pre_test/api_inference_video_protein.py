@@ -35,7 +35,7 @@ VIDEO_ROOT      = Path("/aifs4su/zhanqimin/ai_for_healthcare/data"
 # ─── API ─────────────────────────────────────────────────────────────────────
 API_URL = "https://api3.xhub.chat/v1/chat/completions"
 API_KEY = "sk-Co7aVxrhEYKOomDszhPgOvksE1sLEaOLl4MVV5g1AnOaTE1z"
-MODEL   = "gemini-2.5-flash"
+MODEL   = "gemini-3.1-pro-preview"
 
 # ─── 采样参数 ─────────────────────────────────────────────────────────────────
 MAX_VIDEOS         = 4
